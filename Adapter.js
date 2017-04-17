@@ -19,10 +19,12 @@ class RethinkAdapter {
             host: "localhost",
             password: "",
             migrate: "alter",
+            database: "",
         };
         this.datastores = {};
         this.operations = [];
         this.collections = {};
+        this.dbName = "test";
         this.registerConnection = (connection, collections, cb) => __awaiter(this, void 0, void 0, function* () {
             try {
                 yield this.init(connection);
@@ -37,13 +39,13 @@ class RethinkAdapter {
                 if (collections) {
                     let forCreation = Object.keys(collections);
                     if (connection.migrate === "drop") {
-                        yield Promise.all(Object.keys(collections).map((tableName) => r.db(connection.identity).tableDrop(tableName).run(this.connection)));
+                        yield Promise.all(Object.keys(collections).map((tableName) => r.db(this.dbName).tableDrop(tableName).run(this.connection)));
                     }
                     else {
-                        const tableList = yield r.db(connection.identity).tableList().run(this.connection);
+                        const tableList = yield r.db(this.dbName).tableList().run(this.connection);
                         forCreation = forCreation.filter((tableName) => tableList.indexOf(tableName) === -1);
                     }
-                    yield Promise.all(forCreation.map((tableName) => r.db(connection.identity).tableCreate(tableName).run(this.connection)));
+                    yield Promise.all(forCreation.map((tableName) => r.db(this.dbName).tableCreate(tableName).run(this.connection)));
                 }
                 cb();
             }
@@ -52,7 +54,9 @@ class RethinkAdapter {
             }
         });
         this.teardown = (cb) => __awaiter(this, void 0, void 0, function* () {
-            yield this.connection.close();
+            if (this.connection) {
+                yield this.connection.close();
+            }
             cb();
         });
         this.define = (datastoreName, collectionName, definition, cb) => {
@@ -67,7 +71,7 @@ class RethinkAdapter {
             try {
                 yield new Promise((resolve, reject) => {
                     this.execute({
-                        operation: r.db(datastoreName).tableDrop(collectionName),
+                        operation: r.db(this.dbName).tableDrop(collectionName),
                         promiseResolve: resolve,
                         promiseReject: reject,
                     });
@@ -79,7 +83,7 @@ class RethinkAdapter {
             }
         });
         this.find = (datastoreName, collectionName, query, cb) => __awaiter(this, void 0, void 0, function* () {
-            let operation = r.db(datastoreName).table(collectionName);
+            let operation = r.db(this.dbName).table(collectionName);
             operation = this.addQueryToSequence(operation, query);
             let isGroupBy = false;
             let isAggregate = false;
@@ -129,7 +133,7 @@ class RethinkAdapter {
             try {
                 const result = yield new Promise((resolve, reject) => {
                     this.execute({
-                        operation: r.db(datastore).table(collection).insert(values),
+                        operation: r.db(this.dbName).table(collection).insert(values),
                         promiseResolve: resolve,
                         promiseReject: reject,
                     });
@@ -144,7 +148,7 @@ class RethinkAdapter {
             try {
                 const result = yield new Promise((resolve, reject) => {
                     this.execute({
-                        operation: r.db(datastore).table(collection).update(values),
+                        operation: r.db(this.dbName).table(collection).update(values),
                         promiseResolve: resolve,
                         promiseReject: reject,
                     });
@@ -159,7 +163,7 @@ class RethinkAdapter {
             try {
                 const result = yield new Promise((resolve, reject) => {
                     this.execute({
-                        operation: this.addQueryToSequence(r.db(store).table(collection), query).delete(),
+                        operation: this.addQueryToSequence(r.db(this.dbName).table(collection), query).delete(),
                         promiseResolve: resolve,
                         promiseReject: reject,
                     });
@@ -179,6 +183,7 @@ class RethinkAdapter {
                 port: config.port,
                 password: config.password,
             });
+            this.dbName = config.database;
         });
     }
     getAggregateResult(operation, query, funcName) {

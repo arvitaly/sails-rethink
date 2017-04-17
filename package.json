@@ -1,0 +1,37 @@
+{
+  "name": "sails-rethink",
+  "version": "1.0.0",
+  "description": "RethinkDB adapter for Sails",
+  "main": "index.js",
+  "scripts": {
+    "test": "tsc && tslint --project=tsconfig.json && jest --verbose --coverage",
+    "mocha": "node test/integration/runner -R spec -b",
+    "watch:test": "jest --watch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arvitaly/sails-rethink.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/arvitaly/sails-rethink/issues"
+  },
+  "homepage": "https://github.com/arvitaly/sails-rethink#readme",
+  "jest": {},
+  "devDependencies": {
+    "@types/jest": "^19.2.2",
+    "coveralls": "^2.13.0",
+    "jest": "^19.0.2",
+    "mocha": "^3.2.0",
+    "tslint": "^5.1.0",
+    "typescript": "^2.2.2",
+    "waterline-adapter-tests": "^0.12.1"
+  },
+  "dependencies": {
+    "@types/rethinkdb": "^2.3.2",
+    "@types/waterline": "^0.11.1",
+    "rethinkdb": "^2.3.3"
+  }
+}

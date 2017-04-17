@@ -19,7 +19,7 @@ describe("WhereUtil tests", () => {
                 field: 1.1,
             }, {
                 m: 16,
-                m2: "f1"
+                m2: "f1",
             }],
         });
         expect((expr as any).toString()).toMatchSnapshot();

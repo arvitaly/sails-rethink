@@ -9,6 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const r = require("rethinkdb");
+const WhereUtil_1 = require("./WhereUtil");
 class RethinkAdapter {
     constructor() {
         this.identity = "sails-rethink";
@@ -85,38 +86,24 @@ class RethinkAdapter {
             }
         });
         this.find = (datastoreName, collectionName, query, cb) => __awaiter(this, void 0, void 0, function* () {
-            console.log(query);
             let operation = r.db(datastoreName).table(collectionName);
-            if (query.where) {
-                const conditions = Object.keys(query.where).map((fieldName) => {
-                    switch (this.collections[collectionName][fieldName].type) {
-                        case "string":
-                            return r.row(fieldName).downcase().eq(query.where[fieldName]);
-                        default:
-                            return r.row(fieldName).eq(query.where[fieldName]);
-                    }
-                });
-                const condition = conditions.shift();
-                if (condition) {
-                    let expr = condition;
-                    conditions.map((cond) => expr = expr.and(cond));
-                    console.log(expr.toString());
-                    operation = operation.filter(expr);
-                }
+            operation = this.addQueryToSequence(operation, query);
+            let isGroupBy = false;
+            let isAggregate = false;
+            if (query.groupBy) {
+                operation = operation.group(...query.groupBy);
+                isGroupBy = true;
             }
-            if (query.sort) {
-                const orderBy = Object.keys(query.sort).map((fieldName) => {
-                    return query.sort[fieldName] === 1 ? fieldName : r.desc(fieldName);
-                });
-                // console.log("orderBy", orderBy[0]);
-                operation = operation.orderBy(...orderBy);
+            let result;
+            if (query.average) {
+                result = yield this.getAggregateResult(operation, query, "average");
+                isAggregate = true;
             }
-            if (query.limit) {
-                operation = operation.limit(query.limit);
+            else if (query.sum) {
+                result = yield this.getAggregateResult(operation, query, "sum");
+                isAggregate = true;
             }
-            // console.log("query.where", query);
-            // operation = r.db('queryable').table('userTable2').orderBy(...["age"]);
-            try {
+            else {
                 const cursor = yield new Promise((resolve, reject) => {
                     this.execute({
                         operation,
@@ -124,19 +111,26 @@ class RethinkAdapter {
                         promiseReject: reject,
                     });
                 });
-                cursor.toArray((err, result) => {
-                    if (err) {
-                        cb(err);
-                        return;
-                    }
-                    console.log("result", result.length);
-                    cb(null, result);
-                    // console.log(JSON.stringify(result, null, 2));
-                });
+                console.log("cursor", cursor);
+                result = yield cursor.toArray();
+                console.log("result", result);
+                if (result) {
+                    console.log("reuslt.length", result.length);
+                }
             }
-            catch (e) {
-                cb(e);
+            if (isGroupBy) {
+                if (isAggregate) {
+                    Object.keys(result).map((aggKeyName) => {
+                        result = result[aggKeyName].map((v) => {
+                            return {
+                                [query.groupBy[0]]: v.group,
+                                [aggKeyName]: v.reduction,
+                            };
+                        });
+                    });
+                }
             }
+            cb(null, result);
         });
         this.create = (datastore, collection, values, cb) => __awaiter(this, void 0, void 0, function* () {
             try {
@@ -168,19 +162,21 @@ class RethinkAdapter {
             // Respond with error or an array of updated records.
             cb(null, []);
         };
-        this.destroy = (collectionName, options, cb) => {
-            // If you need to access your private data for this collection:
-            var collection = _modelReferences[collectionName];
-            // 1. Filter, paginate, and sort records from the datastore.
-            //    You should end up w/ an array of objects as a result.
-            //    If no matches were found, this will be an empty array.
-            //    
-            // 2. Destroy all result records.
-            // 
-            // (do both in a single query if you can-- it's faster)
-            // Return an error, otherwise it's declared a success.
-            cb();
-        };
+        this.destroy = (store, collection, query, cb) => __awaiter(this, void 0, void 0, function* () {
+            try {
+                const result = yield new Promise((resolve, reject) => {
+                    this.execute({
+                        operation: this.addQueryToSequence(r.db(store).table(collection), query).delete(),
+                        promiseResolve: resolve,
+                        promiseReject: reject,
+                    });
+                });
+                cb(null, result.deleted);
+            }
+            catch (e) {
+                cb(e);
+            }
+        });
         // this.init();
     }
     init(config) {
@@ -191,6 +187,65 @@ class RethinkAdapter {
                 password: config.password,
             });
         });
+    }
+    getAggregateResult(operation, query, funcName) {
+        return __awaiter(this, void 0, void 0, function* () {
+            let fields;
+            if (query[funcName] instanceof Array) {
+                fields = query[funcName];
+            }
+            else {
+                fields = [query[funcName]];
+            }
+            const result = {};
+            yield Promise.all(fields.map((fieldName) => __awaiter(this, void 0, void 0, function* () {
+                let newOperation;
+                switch (funcName) {
+                    case "average":
+                        newOperation = operation.avg(fieldName);
+                        break;
+                    case "sum":
+                        newOperation = operation.sum(fieldName);
+                        break;
+                    default:
+                }
+                const r = yield new Promise((resolve, reject) => {
+                    this.execute({
+                        operation: newOperation,
+                        promiseResolve: resolve,
+                        promiseReject: reject,
+                    });
+                });
+                result[fieldName] = r;
+            })));
+            console.log("re", result);
+            return result;
+        });
+    }
+    addQueryToSequence(operation, query) {
+        console.log(query);
+        if (query.where) {
+            const expr = WhereUtil_1.findCriteriaToExpr(query.where);
+            if (expr) {
+                operation = operation.filter(expr);
+                console.log("expr", expr.toString());
+            }
+        }
+        if (query.sort) {
+            const orderBy = Object.keys(query.sort).map((fieldName) => {
+                return query.sort[fieldName] === 1 ? fieldName : r.desc(fieldName);
+            });
+            // console.log("orderBy", orderBy[0]);
+            operation = operation.orderBy(...orderBy);
+        }
+        if (query.limit) {
+            operation = operation.limit(query.limit);
+        }
+        if (query.skip) {
+            operation = operation.skip(query.skip);
+        }
+        console.log("operation", operation);
+        return operation;
     }
     execute(operation) {
         this.operations.push(operation);

@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "tsc && tslint --project=tsconfig.json && jest --verbose --coverage",
-    "mocha": "node test/integration/runner -R spec -b",
+    "mocha": "node --trace-warnings test/integration/runner -R spec -b",
     "watch:test": "jest --watch"
   },
   "repository": {

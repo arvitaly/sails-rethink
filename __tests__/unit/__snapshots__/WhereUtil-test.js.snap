@@ -1,0 +1,5 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`WhereUtil tests when criteria is or, should expect 1`] = `"r.row(\\"test\\").downcase().eq(\\"x\\").and(r.row(\\"field\\").downcase()).or(r.row(\\"m\\").downcase().and(r.row(\\"m2\\").downcase().eq(\\"f1\\")))"`;
+
+exports[`WhereUtil tests when criteria is plain object, should expect 1`] = `"r.row(\\"field1\\").downcase().lt(15).and(r.row(\\"field2\\").downcase().le(25)).and(r.row(\\"field3\\").downcase().gt(40.8)).and(r.row(\\"field4\\").downcase().ge(\\"xo\\").and(r.row(\\"field4\\").downcase().match(\\"^m16575$\\"))).and(r.row(\\"field5\\").downcase().not().and(r.row(\\"field5\\").downcase().match(\\"^.*hel.*l.*o$\\")).and(r.row(\\"field5\\").downcase().match(\\"cont1\\")).and(r.row(\\"field5\\").downcase().match(\\"^ho\\")).and(r.row(\\"field5\\").downcase().match(\\"ar$\\")))"`;

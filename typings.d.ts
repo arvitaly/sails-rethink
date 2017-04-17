@@ -25,5 +25,14 @@ declare module "rethinkdb" {
     interface Expression<T> {
         downcase(): Expression<T>;
         upper(): Expression<T>;
+        match(expr: string): Expression<T>;
+    }
+    interface Sequence {
+        avg(filter: string): Aggregator;
+        sum(filter: string): Aggregator;
+        group(...aggregators: Aggregator[]): Sequence;
+    }
+    interface Aggregator extends Operation<any> {
+
     }
 }

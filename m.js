@@ -8,27 +8,15 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-const TestRunner = require("waterline-adapter-tests");
-const Adapter = require("./../..");
 const r = require("rethinkdb");
 function start() {
     return __awaiter(this, void 0, void 0, function* () {
         const connection = yield r.connect({
             password: "123123",
         });
-        try {
-            yield r.dbDrop("queryable").run(connection);
-        }
-        catch (e) {
-        }
-        const runner = new TestRunner({
-            adapter: Adapter,
-            config: {
-                password: "123123",
-            },
-            interfaces: ["queryable"],
-            failOnError: true,
-        });
+        console.log(r.row("first_name").downcase().match("ar\\)h\\$daxx$").and(r.row("type").downcase().eq("case sensitivity")).toString());
+        const result = yield r.db("queryable").table("userTable2").filter(r.row("first_name").downcase().match("ar\\)h\\$daxx$").and(r.row("type").downcase().eq("case sensitivity"))).run(connection);
+        console.log(yield result.toArray());
     });
 }
 start();

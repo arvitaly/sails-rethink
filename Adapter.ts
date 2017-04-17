@@ -1,11 +1,12 @@
 import r = require("rethinkdb");
 import { Attributes } from "waterline";
+import { findCriteriaToExpr } from "./WhereUtil";
 interface IOperation {
     operation: r.Operation<any>;
     promiseResolve: any;
     promiseReject: (err: any) => void;
 }
-class RethinkAdapter implements IAdapter {
+class RethinkAdapter {
     public identity = "sails-rethink";
     public adapterApiVersion = 1;
     public syncable: false;
@@ -98,25 +99,90 @@ class RethinkAdapter implements IAdapter {
             cb(e);
         }
     }
+    public async getAggregateResult(operation: r.Sequence, query: any, funcName: string) {
+        let fields: string[];
+        if (query[funcName] instanceof Array) {
+            fields = query[funcName];
+        } else {
+            fields = [query[funcName]];
+        }
+        const result: any = {};
+        await Promise.all(fields.map(async (fieldName) => {
+            let newOperation: r.Aggregator;
+            switch (funcName) {
+                case "average":
+                    newOperation = operation.avg(fieldName);
+                    break;
+                case "sum":
+                    newOperation = operation.sum(fieldName);
+                    break;
+                default:
+            }
+            const r = await new Promise((resolve, reject) => {
+                this.execute({
+                    operation: newOperation,
+                    promiseResolve: resolve,
+                    promiseReject: reject,
+                });
+            });
+            result[fieldName] = r;
+        }));
+        console.log("re", result);
+        return result;
+    }
     public find = async (
         datastoreName: string, collectionName: string, query: any, cb: (error: any, records?: any[]) => void) => {
-        console.log(query);
         let operation: r.Sequence = r.db(datastoreName).table(collectionName);
-        if (query.where) {
-            const conditions = Object.keys(query.where).map((fieldName) => {
-                switch (this.collections[collectionName][fieldName].type) {
-                    case "string":
-                        return r.row(fieldName).downcase().eq(query.where[fieldName]);
-                    default:
-                        return r.row(fieldName).eq(query.where[fieldName]);
-                }
+        operation = this.addQueryToSequence(operation, query);
+        let isGroupBy = false;
+        let isAggregate = false;
+        if (query.groupBy) {
+            operation = operation.group(...query.groupBy);
+            isGroupBy = true;
+        }
+        let result: any;
+        if (query.average) {
+            result = await this.getAggregateResult(operation, query, "average");
+            isAggregate = true;
+        } else if (query.sum) {
+            result = await this.getAggregateResult(operation, query, "sum");
+            isAggregate = true;
+        } else {
+            const cursor = await new Promise<any>((resolve, reject) => {
+                this.execute({
+                    operation,
+                    promiseResolve: resolve,
+                    promiseReject: reject,
+                });
             });
-            const condition = conditions.shift();
-            if (condition) {
-                let expr: r.Expression<boolean> = condition;
-                conditions.map((cond) => expr = expr.and(cond));
-                console.log(expr.toString());
+            console.log("cursor", cursor);
+            result = await cursor.toArray();
+            console.log("result", result);
+            if (result) {
+                console.log("reuslt.length", result.length);
+            }
+        }
+        if (isGroupBy) {
+            if (isAggregate) {
+                Object.keys(result).map((aggKeyName) => {
+                    result = result[aggKeyName].map((v) => {
+                        return {
+                            [query.groupBy[0]]: v.group,
+                            [aggKeyName]: v.reduction,
+                        }
+                    });
+                });
+            }
+        }
+        cb(null, result);
+    }
+    public addQueryToSequence(operation: r.Sequence, query: any): r.Sequence {
+        console.log(query);
+        if (query.where) {
+            const expr = findCriteriaToExpr(query.where);
+            if (expr) {
                 operation = operation.filter(expr);
+                console.log("expr", expr.toString())
             }
         }
         if (query.sort) {
@@ -129,25 +195,11 @@ class RethinkAdapter implements IAdapter {
         if (query.limit) {
             operation = operation.limit(query.limit);
         }
-        // console.log("query.where", query);
-        // operation = r.db('queryable').table('userTable2').orderBy(...["age"]);
-        try {
-            const cursor = await new Promise<any>((resolve, reject) => {
-                this.execute({
-                    operation,
-                    promiseResolve: resolve,
-                    promiseReject: reject,
-                });
-            });
-            cursor.toArray((err: any, result: any) => {
-                if (err) { cb(err); return; }
-                console.log("result", result.length);
-                cb(null, result);
-                // console.log(JSON.stringify(result, null, 2));
-            });
-        } catch (e) {
-            cb(e);
+        if (query.skip) {
+            operation = operation.skip(query.skip);
         }
+        console.log("operation", operation);
+        return operation;
     }
     public create = async (datastore: string, collection: string, values: any, cb: (err: any, res?: any) => void) => {
         try {
@@ -180,22 +232,19 @@ class RethinkAdapter implements IAdapter {
         // Respond with error or an array of updated records.
         cb(null, []);
     }
-    public destroy = (collectionName, options, cb) => {
-
-        // If you need to access your private data for this collection:
-        var collection = _modelReferences[collectionName];
-
-
-        // 1. Filter, paginate, and sort records from the datastore.
-        //    You should end up w/ an array of objects as a result.
-        //    If no matches were found, this will be an empty array.
-        //    
-        // 2. Destroy all result records.
-        // 
-        // (do both in a single query if you can-- it's faster)
-
-        // Return an error, otherwise it's declared a success.
-        cb();
+    public destroy = async (store: string, collection: string, query: any, cb: (err: any, results?: any) => void) => {
+        try {
+            const result = await new Promise<r.WriteResult>((resolve, reject) => {
+                this.execute({
+                    operation: this.addQueryToSequence(r.db(store).table(collection), query).delete(),
+                    promiseResolve: resolve,
+                    promiseReject: reject,
+                });
+            });
+            cb(null, result.deleted);
+        } catch (e) {
+            cb(e);
+        }
     }
     protected execute(operation: IOperation) {
         this.operations.push(operation);

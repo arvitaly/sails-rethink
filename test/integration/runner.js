@@ -20,6 +20,7 @@ function start() {
             yield r.dbDrop("queryable").run(connection);
         }
         catch (e) {
+            // IGNORE
         }
         const runner = new TestRunner({
             adapter: Adapter,

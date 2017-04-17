@@ -51,17 +51,10 @@ class RethinkAdapter {
                 cb(e);
             }
         });
-        this.registerCollection = (collection, cb) => {
-            // Keep a reference to this collection
-            // _modelReferences[collection.identity] = collection;
-            // cb();
-            process.exit(1);
-        };
-        this.teardown = (cb) => {
-            console.log("teardown");
-            process.exit(1);
+        this.teardown = (cb) => __awaiter(this, void 0, void 0, function* () {
+            yield this.connection.close();
             cb();
-        };
+        });
         this.define = (datastoreName, collectionName, definition, cb) => {
             this.collections[collectionName] = definition;
             cb();
@@ -111,11 +104,11 @@ class RethinkAdapter {
                         promiseReject: reject,
                     });
                 });
-                console.log("cursor", cursor);
+                this.log("cursor", cursor);
                 result = yield cursor.toArray();
-                console.log("result", result);
+                this.log("result", result);
                 if (result) {
-                    console.log("reuslt.length", result.length);
+                    this.log("reuslt.length", result.length);
                 }
             }
             if (isGroupBy) {
@@ -147,21 +140,21 @@ class RethinkAdapter {
                 cb(e);
             }
         });
-        this.update = (datastore, collection, values, cb) => {
-            console.log("update", datastore, collection, values);
-            process.exit(1);
-            // If you need to access your private data for this collection:
-            var collection = _modelReferences[collectionName];
-            // 1. Filter, paginate, and sort records from the datastore.
-            //    You should end up w/ an array of objects as a result.
-            //    If no matches were found, this will be an empty array.
-            //    
-            // 2. Update all result records with `values`.
-            // 
-            // (do both in a single query if you can-- it's faster)
-            // Respond with error or an array of updated records.
-            cb(null, []);
-        };
+        this.update = (datastore, collection, values, cb) => __awaiter(this, void 0, void 0, function* () {
+            try {
+                const result = yield new Promise((resolve, reject) => {
+                    this.execute({
+                        operation: r.db(datastore).table(collection).update(values),
+                        promiseResolve: resolve,
+                        promiseReject: reject,
+                    });
+                });
+                cb(null, result.inserted);
+            }
+            catch (e) {
+                cb(e);
+            }
+        });
         this.destroy = (store, collection, query, cb) => __awaiter(this, void 0, void 0, function* () {
             try {
                 const result = yield new Promise((resolve, reject) => {
@@ -218,17 +211,17 @@ class RethinkAdapter {
                 });
                 result[fieldName] = r;
             })));
-            console.log("re", result);
+            this.log("re", result);
             return result;
         });
     }
     addQueryToSequence(operation, query) {
-        console.log(query);
+        this.log(query);
         if (query.where) {
             const expr = WhereUtil_1.findCriteriaToExpr(query.where);
             if (expr) {
                 operation = operation.filter(expr);
-                console.log("expr", expr.toString());
+                this.log("expr", expr.toString());
             }
         }
         if (query.sort) {
@@ -244,7 +237,7 @@ class RethinkAdapter {
         if (query.skip) {
             operation = operation.skip(query.skip);
         }
-        console.log("operation", operation);
+        this.log("operation", operation);
         return operation;
     }
     execute(operation) {
@@ -277,6 +270,9 @@ class RethinkAdapter {
                 operation.promiseReject(e);
             }
         });
+    }
+    log(...args) {
+        console.log.apply(console, args);
     }
 }
 exports.default = RethinkAdapter;

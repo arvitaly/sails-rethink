@@ -65,15 +65,8 @@ class RethinkAdapter {
             cb(e);
         }
     }
-    public registerCollection = (collection, cb: ICallback) => {
-        // Keep a reference to this collection
-        // _modelReferences[collection.identity] = collection;
-        // cb();
-        process.exit(1);
-    }
-    public teardown = (cb: ICallback) => {
-        console.log("teardown");
-        process.exit(1);
+    public teardown = async (cb: ICallback) => {
+        await this.connection.close();
         cb();
     }
     public define = (datastoreName: string, collectionName: string, definition: any, cb: ICallback) => {
@@ -127,7 +120,7 @@ class RethinkAdapter {
             });
             result[fieldName] = r;
         }));
-        console.log("re", result);
+        this.log("re", result);
         return result;
     }
     public find = async (
@@ -155,21 +148,21 @@ class RethinkAdapter {
                     promiseReject: reject,
                 });
             });
-            console.log("cursor", cursor);
+            this.log("cursor", cursor);
             result = await cursor.toArray();
-            console.log("result", result);
+            this.log("result", result);
             if (result) {
-                console.log("reuslt.length", result.length);
+                this.log("reuslt.length", result.length);
             }
         }
         if (isGroupBy) {
             if (isAggregate) {
                 Object.keys(result).map((aggKeyName) => {
-                    result = result[aggKeyName].map((v) => {
+                    result = result[aggKeyName].map((v: any) => {
                         return {
                             [query.groupBy[0]]: v.group,
                             [aggKeyName]: v.reduction,
-                        }
+                        };
                     });
                 });
             }
@@ -177,12 +170,12 @@ class RethinkAdapter {
         cb(null, result);
     }
     public addQueryToSequence(operation: r.Sequence, query: any): r.Sequence {
-        console.log(query);
+        this.log(query);
         if (query.where) {
             const expr = findCriteriaToExpr(query.where);
             if (expr) {
                 operation = operation.filter(expr);
-                console.log("expr", expr.toString())
+                this.log("expr", expr.toString());
             }
         }
         if (query.sort) {
@@ -198,7 +191,7 @@ class RethinkAdapter {
         if (query.skip) {
             operation = operation.skip(query.skip);
         }
-        console.log("operation", operation);
+        this.log("operation", operation);
         return operation;
     }
     public create = async (datastore: string, collection: string, values: any, cb: (err: any, res?: any) => void) => {
@@ -215,22 +208,19 @@ class RethinkAdapter {
             cb(e);
         }
     }
-    public update = (datastore: string, collection: string, values: any, cb: (err: any, res?: any) => void) => {
-        console.log("update", datastore, collection, values);
-        process.exit(1);
-        // If you need to access your private data for this collection:
-        var collection = _modelReferences[collectionName];
-
-        // 1. Filter, paginate, and sort records from the datastore.
-        //    You should end up w/ an array of objects as a result.
-        //    If no matches were found, this will be an empty array.
-        //    
-        // 2. Update all result records with `values`.
-        // 
-        // (do both in a single query if you can-- it's faster)
-
-        // Respond with error or an array of updated records.
-        cb(null, []);
+    public update = async (datastore: string, collection: string, values: any, cb: (err: any, res?: any) => void) => {
+        try {
+            const result = await new Promise<r.WriteResult>((resolve, reject) => {
+                this.execute({
+                    operation: r.db(datastore).table(collection).update(values),
+                    promiseResolve: resolve,
+                    promiseReject: reject,
+                });
+            });
+            cb(null, result.inserted);
+        } catch (e) {
+            cb(e);
+        }
     }
     public destroy = async (store: string, collection: string, query: any, cb: (err: any, results?: any) => void) => {
         try {
@@ -271,6 +261,9 @@ class RethinkAdapter {
         } catch (e) {
             operation.promiseReject(e);
         }
+    }
+    protected log(...args: any[]) {
+        console.log.apply(console, args);
     }
 }
 type ICallback = () => void;

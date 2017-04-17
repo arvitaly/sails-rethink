@@ -6,6 +6,7 @@ declare module "waterline-adapter-tests" {
 
     }
     interface IDefaultConfig {
+        [index: string]: any;
         schema?: boolean;
         migrate?: "alter" | "drop" | "safe";
     }

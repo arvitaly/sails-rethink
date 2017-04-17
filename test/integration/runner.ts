@@ -9,10 +9,10 @@ async function start() {
     try {
         await r.dbDrop("queryable").run(connection);
     } catch (e) {
-
+        // IGNORE
     }
     const runner = new TestRunner({
-        adapter: Adapter,
+        adapter: Adapter as any,
         config: {
             password: "123123",
         },

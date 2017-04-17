@@ -33,5 +33,12 @@
     "@types/rethinkdb": "^2.3.2",
     "@types/waterline": "^0.11.1",
     "rethinkdb": "^2.3.3"
+  },
+  "waterlineAdapter": {
+    "waterlineVersion": "^0.13.0",
+    "interfaces": [
+      "queryable"
+    ],
+    "features": []
   }
 }

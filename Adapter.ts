@@ -1,14 +1,11 @@
 import r = require("rethinkdb");
 import { Attributes } from "waterline";
+import Connection from "./Connection";
 import { findCriteriaToExpr } from "./WhereUtil";
-interface IOperation {
-    operation: r.Operation<any>;
-    promiseResolve: any;
-    promiseReject: (err: any) => void;
-}
+
 class RethinkAdapter {
     public identity = "sails-rethink";
-    public adapterApiVersion = 1;
+    // public adapterApiVersion = 1; // TODO
     public syncable: false;
     public defaults = {
         port: 28015,
@@ -17,87 +14,47 @@ class RethinkAdapter {
         migrate: "alter",
         database: "",
     };
-    public datastores = {};
-    protected operations: IOperation[] = [];
-    protected connection: r.Connection;
-    protected collections: { [index: string]: any } = {};
-    protected dbName = "test";
-    constructor() {
-        // this.init();
-    }
-    public async init(config: any) {
-        this.connection = await r.connect({
-            host: config.host,
-            port: config.port,
-            password: config.password,
-        });
-        this.dbName = config.database;
-    }
+    public connections: { [index: string]: Connection } = {};
+
     public registerConnection = async (
-        connection: { identity: string; migrate: "alter" | "drop" | "safe" },
+        connectionConfig: { identity: string; migrate: "alter" | "drop" | "safe" },
         collections: {
             [index: string]: {
                 attributes: Attributes;
             },
         } | null,
         cb: (err?: any) => void) => {
+        const connection = new Connection(connectionConfig);
+        this.connections[connectionConfig.identity] = connection;
+        await connection.connect();
+        cb();
+    }
+    public teardown = async (identity: string, cb: (err?: any) => void) => {
+        if (this.connections[identity]) {
+            await this.connections[identity].close();
+        }
+        cb();
+    }
+    public define = async (conn: string, collectionName: string, definition: any, cb: (err?: any) => void) => {
         try {
-            await this.init(connection);
-            if (connection.migrate === "safe") {
-                cb(null);
-                return;
-            }
-            const dbList = await r.dbList().run(this.connection);
-            if (dbList.indexOf(connection.identity) === -1) {
-                await r.dbCreate(connection.identity).run(this.connection);
-            }
-            if (collections) {
-                let forCreation: string[] = Object.keys(collections);
-                if (connection.migrate === "drop") {
-                    await Promise.all(Object.keys(collections).map((tableName) =>
-                        r.db(this.dbName).tableDrop(tableName).run(this.connection)));
-                } else {
-                    const tableList = await r.db(this.dbName).tableList().run(this.connection);
-                    forCreation = forCreation.filter((tableName) => tableList.indexOf(tableName) === -1);
-                }
-                await Promise.all(forCreation.map((tableName) =>
-                    r.db(this.dbName).tableCreate(tableName).run(this.connection)));
-            }
+            await this.connections[conn].define(collectionName);
             cb();
         } catch (e) {
             cb(e);
         }
     }
-    public teardown = async (cb: ICallback) => {
-        if (this.connection) {
-            await this.connection.close();
-        }
-        cb();
+    public describe = (conn: string, collectionName: string, cb: (error: any, attributes: any) => void, meta: any) => {
+        cb(null, null);  // send null for attributes, because database not has schema
     }
-    public define = (datastoreName: string, collectionName: string, definition: any, cb: ICallback) => {
-        this.collections[collectionName] = definition;
-        cb();
-    }
-    public describe = (
-        datastoreName: string, collectionName: string, cb: (error: any, attributes: any) => void, meta: any) => {
-        const attributes = null;
-        cb(null, attributes);
-    }
-    public drop = async (datastoreName: string, collectionName: string, relations: any, cb: (err?: any) => void) => {
+    public drop = async (connection: string, collectionName: string, relations: any, cb: (err?: any) => void) => {
         try {
-            await new Promise((resolve, reject) => {
-                this.execute({
-                    operation: r.db(this.dbName).tableDrop(collectionName),
-                    promiseResolve: resolve,
-                    promiseReject: reject,
-                });
-            });
+            const result = await this.connections[connection].execute(r.tableDrop(collectionName));
             cb();
         } catch (e) {
             cb(e);
         }
     }
-    public async getAggregateResult(operation: r.Sequence, query: any, funcName: string) {
+    public async getAggregateResult(conn: Connection, operation: r.Sequence, query: any, funcName: string) {
         let fields: string[];
         if (query[funcName] instanceof Array) {
             fields = query[funcName];
@@ -115,22 +72,16 @@ class RethinkAdapter {
                     newOperation = operation.sum(fieldName);
                     break;
                 default:
+                    throw new Error("Unknown aggregate function: " + funcName);
             }
-            const r = await new Promise((resolve, reject) => {
-                this.execute({
-                    operation: newOperation,
-                    promiseResolve: resolve,
-                    promiseReject: reject,
-                });
-            });
+            const r = await conn.execute(newOperation);
             result[fieldName] = r;
         }));
         this.log("re", result);
         return result;
     }
-    public find = async (
-        datastoreName: string, collectionName: string, query: any, cb: (error: any, records?: any[]) => void) => {
-        let operation: r.Sequence = r.db(this.dbName).table(collectionName);
+    public find = async (conn: string, collection: string, query: any, cb: (error: any, records?: any[]) => void) => {
+        let operation: r.Sequence = r.table(collection);
         operation = this.addQueryToSequence(operation, query);
         let isGroupBy = false;
         let isAggregate = false;
@@ -140,19 +91,13 @@ class RethinkAdapter {
         }
         let result: any;
         if (query.average) {
-            result = await this.getAggregateResult(operation, query, "average");
+            result = await this.getAggregateResult(this.connections[conn], operation, query, "average");
             isAggregate = true;
         } else if (query.sum) {
-            result = await this.getAggregateResult(operation, query, "sum");
+            result = await this.getAggregateResult(this.connections[conn], operation, query, "sum");
             isAggregate = true;
         } else {
-            const cursor = await new Promise<any>((resolve, reject) => {
-                this.execute({
-                    operation,
-                    promiseResolve: resolve,
-                    promiseReject: reject,
-                });
-            });
+            const cursor = await this.connections[conn].execute(operation);
             this.log("cursor", cursor);
             result = await cursor.toArray();
             this.log("result", result);
@@ -199,77 +144,33 @@ class RethinkAdapter {
         this.log("operation", operation);
         return operation;
     }
-    public create = async (datastore: string, collection: string, values: any, cb: (err: any, res?: any) => void) => {
+    public create = async (conn: string, collection: string, values: any, cb: (err: any, res?: any) => void) => {
         try {
-            const result = await new Promise<r.WriteResult>((resolve, reject) => {
-                this.execute({
-                    operation: r.db(this.dbName).table(collection).insert(values),
-                    promiseResolve: resolve,
-                    promiseReject: reject,
-                });
-            });
+            const result = await this.connections[conn].execute(r.table(collection).insert(values));
             cb(null, result.inserted);
         } catch (e) {
             cb(e);
         }
     }
-    public update = async (datastore: string, collection: string, values: any, cb: (err: any, res?: any) => void) => {
+    public update = async (conn: string, collection: string, values: any, cb: (err: any, res?: any) => void) => {
         try {
-            const result = await new Promise<r.WriteResult>((resolve, reject) => {
-                this.execute({
-                    operation: r.db(this.dbName).table(collection).update(values),
-                    promiseResolve: resolve,
-                    promiseReject: reject,
-                });
-            });
-            cb(null, result.inserted);
+            const result = await this.connections[conn].execute(r.table(collection).update(values));
+            cb(null, result.replaced);
         } catch (e) {
             cb(e);
         }
     }
-    public destroy = async (store: string, collection: string, query: any, cb: (err: any, results?: any) => void) => {
+    public destroy = async (conn: string, collection: string, query: any, cb: (err: any, results?: any) => void) => {
         try {
-            const result = await new Promise<r.WriteResult>((resolve, reject) => {
-                this.execute({
-                    operation: this.addQueryToSequence(r.db(this.dbName).table(collection), query).delete(),
-                    promiseResolve: resolve,
-                    promiseReject: reject,
-                });
-            });
-            cb(null, result.deleted);
+            const result = await this.connections[conn].execute(
+                this.addQueryToSequence(r.table(collection), query).delete());
+            cb(null, result.replaced);
         } catch (e) {
             cb(e);
-        }
-    }
-    protected execute(operation: IOperation) {
-        this.operations.push(operation);
-        this.tick();
-    }
-    protected async tick() {
-        if (!this.connection || !this.connection.open) {
-            setTimeout(() => this.tick(), 100);
-            return;
-        }
-        const operation = this.operations.shift();
-        if (!operation) {
-            return;
-        }
-        await this.run(operation);
-        if (this.operations.length > 0) {
-            this.tick();
-        }
-    }
-    protected async run(operation: IOperation) {
-        try {
-            const result = await operation.operation.run(this.connection);
-            operation.promiseResolve(result);
-        } catch (e) {
-            operation.promiseReject(e);
         }
     }
     protected log(...args: any[]) {
         console.log.apply(console, args);
     }
 }
-type ICallback = () => void;
 export default RethinkAdapter;

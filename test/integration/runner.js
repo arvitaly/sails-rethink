@@ -15,17 +15,20 @@ function start() {
     return __awaiter(this, void 0, void 0, function* () {
         const connection = yield r.connect({
             password: "123123",
+            db: "sailstest",
         });
         try {
-            yield r.dbDrop("queryable").run(connection);
+            yield r.dbDrop("sailstest").run(connection);
         }
         catch (e) {
             // IGNORE
         }
+        yield r.dbCreate("sailstest").run(connection);
         const runner = new TestRunner({
             adapter: Adapter,
             config: {
                 password: "123123",
+                database: "sailstest",
             },
             interfaces: ["queryable"],
             failOnError: true,

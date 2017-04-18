@@ -9,11 +9,11 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const r = require("rethinkdb");
+const Connection_1 = require("./Connection");
 const WhereUtil_1 = require("./WhereUtil");
 class RethinkAdapter {
     constructor() {
         this.identity = "sails-rethink";
-        this.adapterApiVersion = 1;
         this.defaults = {
             port: 28015,
             host: "localhost",
@@ -21,69 +21,42 @@ class RethinkAdapter {
             migrate: "alter",
             database: "",
         };
-        this.datastores = {};
-        this.operations = [];
-        this.collections = {};
-        this.dbName = "test";
-        this.registerConnection = (connection, collections, cb) => __awaiter(this, void 0, void 0, function* () {
+        this.connections = {};
+        this.registerConnection = (connectionConfig, collections, cb) => __awaiter(this, void 0, void 0, function* () {
+            const connection = new Connection_1.default(connectionConfig);
+            this.connections[connectionConfig.identity] = connection;
+            yield connection.connect();
+            cb();
+        });
+        this.teardown = (identity, cb) => __awaiter(this, void 0, void 0, function* () {
+            if (this.connections[identity]) {
+                yield this.connections[identity].close();
+            }
+            cb();
+        });
+        this.define = (conn, collectionName, definition, cb) => __awaiter(this, void 0, void 0, function* () {
             try {
-                yield this.init(connection);
-                if (connection.migrate === "safe") {
-                    cb(null);
-                    return;
-                }
-                const dbList = yield r.dbList().run(this.connection);
-                if (dbList.indexOf(connection.identity) === -1) {
-                    yield r.dbCreate(connection.identity).run(this.connection);
-                }
-                if (collections) {
-                    let forCreation = Object.keys(collections);
-                    if (connection.migrate === "drop") {
-                        yield Promise.all(Object.keys(collections).map((tableName) => r.db(this.dbName).tableDrop(tableName).run(this.connection)));
-                    }
-                    else {
-                        const tableList = yield r.db(this.dbName).tableList().run(this.connection);
-                        forCreation = forCreation.filter((tableName) => tableList.indexOf(tableName) === -1);
-                    }
-                    yield Promise.all(forCreation.map((tableName) => r.db(this.dbName).tableCreate(tableName).run(this.connection)));
-                }
+                yield this.connections[conn].define(collectionName);
                 cb();
             }
             catch (e) {
                 cb(e);
             }
         });
-        this.teardown = (cb) => __awaiter(this, void 0, void 0, function* () {
-            if (this.connection) {
-                yield this.connection.close();
-            }
-            cb();
-        });
-        this.define = (datastoreName, collectionName, definition, cb) => {
-            this.collections[collectionName] = definition;
-            cb();
+        this.describe = (conn, collectionName, cb, meta) => {
+            cb(null, null); // send null for attributes, because database not has schema
         };
-        this.describe = (datastoreName, collectionName, cb, meta) => {
-            const attributes = null;
-            cb(null, attributes);
-        };
-        this.drop = (datastoreName, collectionName, relations, cb) => __awaiter(this, void 0, void 0, function* () {
+        this.drop = (connection, collectionName, relations, cb) => __awaiter(this, void 0, void 0, function* () {
             try {
-                yield new Promise((resolve, reject) => {
-                    this.execute({
-                        operation: r.db(this.dbName).tableDrop(collectionName),
-                        promiseResolve: resolve,
-                        promiseReject: reject,
-                    });
-                });
+                const result = yield this.connections[connection].execute(r.tableDrop(collectionName));
                 cb();
             }
             catch (e) {
                 cb(e);
             }
         });
-        this.find = (datastoreName, collectionName, query, cb) => __awaiter(this, void 0, void 0, function* () {
-            let operation = r.db(this.dbName).table(collectionName);
+        this.find = (conn, collection, query, cb) => __awaiter(this, void 0, void 0, function* () {
+            let operation = r.table(collection);
             operation = this.addQueryToSequence(operation, query);
             let isGroupBy = false;
             let isAggregate = false;
@@ -93,21 +66,15 @@ class RethinkAdapter {
             }
             let result;
             if (query.average) {
-                result = yield this.getAggregateResult(operation, query, "average");
+                result = yield this.getAggregateResult(this.connections[conn], operation, query, "average");
                 isAggregate = true;
             }
             else if (query.sum) {
-                result = yield this.getAggregateResult(operation, query, "sum");
+                result = yield this.getAggregateResult(this.connections[conn], operation, query, "sum");
                 isAggregate = true;
             }
             else {
-                const cursor = yield new Promise((resolve, reject) => {
-                    this.execute({
-                        operation,
-                        promiseResolve: resolve,
-                        promiseReject: reject,
-                    });
-                });
+                const cursor = yield this.connections[conn].execute(operation);
                 this.log("cursor", cursor);
                 result = yield cursor.toArray();
                 this.log("result", result);
@@ -129,64 +96,35 @@ class RethinkAdapter {
             }
             cb(null, result);
         });
-        this.create = (datastore, collection, values, cb) => __awaiter(this, void 0, void 0, function* () {
+        this.create = (conn, collection, values, cb) => __awaiter(this, void 0, void 0, function* () {
             try {
-                const result = yield new Promise((resolve, reject) => {
-                    this.execute({
-                        operation: r.db(this.dbName).table(collection).insert(values),
-                        promiseResolve: resolve,
-                        promiseReject: reject,
-                    });
-                });
+                const result = yield this.connections[conn].execute(r.table(collection).insert(values));
                 cb(null, result.inserted);
             }
             catch (e) {
                 cb(e);
             }
         });
-        this.update = (datastore, collection, values, cb) => __awaiter(this, void 0, void 0, function* () {
+        this.update = (conn, collection, values, cb) => __awaiter(this, void 0, void 0, function* () {
             try {
-                const result = yield new Promise((resolve, reject) => {
-                    this.execute({
-                        operation: r.db(this.dbName).table(collection).update(values),
-                        promiseResolve: resolve,
-                        promiseReject: reject,
-                    });
-                });
-                cb(null, result.inserted);
+                const result = yield this.connections[conn].execute(r.table(collection).update(values));
+                cb(null, result.replaced);
             }
             catch (e) {
                 cb(e);
             }
         });
-        this.destroy = (store, collection, query, cb) => __awaiter(this, void 0, void 0, function* () {
+        this.destroy = (conn, collection, query, cb) => __awaiter(this, void 0, void 0, function* () {
             try {
-                const result = yield new Promise((resolve, reject) => {
-                    this.execute({
-                        operation: this.addQueryToSequence(r.db(this.dbName).table(collection), query).delete(),
-                        promiseResolve: resolve,
-                        promiseReject: reject,
-                    });
-                });
-                cb(null, result.deleted);
+                const result = yield this.connections[conn].execute(this.addQueryToSequence(r.table(collection), query).delete());
+                cb(null, result.replaced);
             }
             catch (e) {
                 cb(e);
             }
         });
-        // this.init();
     }
-    init(config) {
-        return __awaiter(this, void 0, void 0, function* () {
-            this.connection = yield r.connect({
-                host: config.host,
-                port: config.port,
-                password: config.password,
-            });
-            this.dbName = config.database;
-        });
-    }
-    getAggregateResult(operation, query, funcName) {
+    getAggregateResult(conn, operation, query, funcName) {
         return __awaiter(this, void 0, void 0, function* () {
             let fields;
             if (query[funcName] instanceof Array) {
@@ -206,14 +144,9 @@ class RethinkAdapter {
                         newOperation = operation.sum(fieldName);
                         break;
                     default:
+                        throw new Error("Unknown aggregate function: " + funcName);
                 }
-                const r = yield new Promise((resolve, reject) => {
-                    this.execute({
-                        operation: newOperation,
-                        promiseResolve: resolve,
-                        promiseReject: reject,
-                    });
-                });
+                const r = yield conn.execute(newOperation);
                 result[fieldName] = r;
             })));
             this.log("re", result);
@@ -244,37 +177,6 @@ class RethinkAdapter {
         }
         this.log("operation", operation);
         return operation;
-    }
-    execute(operation) {
-        this.operations.push(operation);
-        this.tick();
-    }
-    tick() {
-        return __awaiter(this, void 0, void 0, function* () {
-            if (!this.connection || !this.connection.open) {
-                setTimeout(() => this.tick(), 100);
-                return;
-            }
-            const operation = this.operations.shift();
-            if (!operation) {
-                return;
-            }
-            yield this.run(operation);
-            if (this.operations.length > 0) {
-                this.tick();
-            }
-        });
-    }
-    run(operation) {
-        return __awaiter(this, void 0, void 0, function* () {
-            try {
-                const result = yield operation.operation.run(this.connection);
-                operation.promiseResolve(result);
-            }
-            catch (e) {
-                operation.promiseReject(e);
-            }
-        });
     }
     log(...args) {
         console.log.apply(console, args);

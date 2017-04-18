@@ -36,4 +36,10 @@ declare module "rethinkdb" {
     interface Aggregator extends Operation<any> {
 
     }
+    function tableCreate(name: string, options?: TableOptions): Operation<CreateResult>;
+    function tableDrop(name: string): Operation<DropResult>;
+    function tableList(): Operation<string[]>;
+    interface Operation<T> {
+        contains: (expr: string | Function) => Operation<boolean>;
+    }
 }
